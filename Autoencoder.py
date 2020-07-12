@@ -1,6 +1,10 @@
 import torch.nn as nn
 import torch.optim as optim
 import torch
+import numpy as np
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
+import pickle
 
 
 class AutoEncoder(nn.Module):
@@ -36,7 +40,7 @@ class AutoEncoder(nn.Module):
         out = torch.tanh(out)
 
         out = self.fc2(out)
-        out = torch.tanh(out)
+        out = torch.relu(out)
 
         out = self.fc3(out)
         out = torch.relu(out)
@@ -69,7 +73,7 @@ class AutoEncoder(nn.Module):
         out = torch.relu(out)
 
         out = self.fc12(out)
-        out = torch.tanh(out)
+        out = torch.relu(out)
 
         out = self.fc13(out)
         out = torch.tanh(out)
@@ -81,6 +85,61 @@ class AutoEncoder(nn.Module):
         out = torch.relu(out)
 
         out = self.fc16(out)
-        out = torch.softmax(out, dim=1)
 
         return out
+
+
+def train_autoencoder(max_size, autoencoder, batch_size, encoder_type):
+    accuracy_threshold = 0.9995
+    test_accuracies = []
+    while True:
+        n_samples = 10 ** 5
+        x = np.eye(max_size)[np.random.choice(max_size, n_samples)]
+        x_train, x_val = train_test_split(x, test_size=0.2)
+        x_train, x_test = train_test_split(x_train, test_size=0.2)
+
+        x_test = torch.Tensor(x_test).to(autoencoder.device)
+        x_val = torch.Tensor(x_val).to(autoencoder.device)
+        data_loader = DataLoader(dataset=x_train, batch_size=batch_size, shuffle=True,
+                                 pin_memory=True)
+
+        for i, x_train in enumerate(iter(data_loader)):
+            autoencoder.train()
+            x_train = x_train.to(autoencoder.device)
+            autoencoder.optimizer.zero_grad()
+            decoded_x = autoencoder.encoder(x=x_train.float())
+            encoded_x = autoencoder.decoder(x=decoded_x)
+
+            loss = autoencoder.loss(encoded_x, torch.argmax(x_train, dim=1))
+            loss.backward()
+            autoencoder.optimizer.step()
+
+            if i % 1000 == 0:
+                autoencoder.eval()
+                with torch.no_grad():
+                    x_test = x_test.to(autoencoder.device)
+                    x_encoded = autoencoder.encoder(x=x_test)
+                    x_decoded = autoencoder.decoder(x=x_encoded)
+
+                    max_index = x_decoded.max(dim=1)[1]
+                    test_accuracy = (max_index == torch.argmax(x_test, dim=1)).sum()
+                    test_accuracy = test_accuracy.item() / x_test.shape[0]
+                    test_accuracies.append(test_accuracy)
+
+        autoencoder.eval()
+        with torch.no_grad():
+            x_encoded = autoencoder.encoder(x=x_val)
+            x_decoded = autoencoder.decoder(x=x_encoded)
+
+            max_index = x_decoded.max(dim=1)[1]
+            val_accuracy = (max_index == torch.argmax(x_val, dim=1)).sum()
+            val_accuracy = val_accuracy.item() / x_val.shape[0]
+
+            if val_accuracy > accuracy_threshold:
+                torch.save(autoencoder.state_dict(), "auto_encoder_" + encoder_type + str(max_size) + ".pt")
+                with open(encoder_type + '_accuracy' + str(max_size) + '.pickle', 'wb') as b:
+                    pickle.dump(test_accuracies, b)
+
+                break
+
+    return autoencoder

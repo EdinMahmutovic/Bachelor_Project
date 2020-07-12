@@ -8,7 +8,7 @@ class RandomAgent(object):
     def __init__(self):
         pass
 
-    def choose_action(self, action_space):
+    def take_action(self, action_space):
         random_action = np.random.choice(action_space) if action_space.size > 0 else -1
         return random_action
 
@@ -17,34 +17,18 @@ class SOFE(object):
     def __init__(self):
         pass
 
-    def take_action(self, action_space, env):
-        orders = env.orders_by_deadline()
-        for order in orders:
-            for job in list(action_space):
-                if job.order == order:
-                    machine_list_lengths = [len(machine.job_list) for machine in action_space[job]]
-                    idx = machine_list_lengths.index(min(machine_list_lengths))
-                    machines = action_space[job]
-                    machine = machines[idx]
-                    action_space.pop(job)
-                    return job, machine, action_space
+    def take_action(self, action_space):
+        action = action_space[0]
+        return action
 
 
 class FIFO(object):
     def __init__(self):
         pass
 
-    def take_action(self, action_space, env):
-        orders = env.order_list.orders
-        for order in orders:
-            for job in list(action_space):
-                if job.order == order:
-                    machine_list_lengths = [len(machine.job_list) for machine in action_space[job]]
-                    idx = machine_list_lengths.index(min(machine_list_lengths))
-                    machines = action_space[job]
-                    machine = machines[idx]
-                    action_space.pop(job)
-                    return job, machine, action_space
+    def take_action(self, action_space):
+        action = action_space[0]
+        return action
 
 
 class LearningAgent(object):
@@ -55,17 +39,17 @@ class LearningAgent(object):
         self.gamma = gamma
         self.epsilon = epsilon
         self.lr = lr
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.num_features = num_features
-        self.input_size = input_size
-        self.max_jobs = max_jobs
-        self.max_orders = max_orders
-        self.num_processes = num_processes
-        self.n_orders = n_orders
-        self.n_process = n_process
-        self.batch_size = batch_size
-        self.n_actions = n_actions
+        self.hidden_size = int(hidden_size)
+        self.num_layers = int(num_layers)
+        self.num_features = int(num_features)
+        self.input_size = int(input_size)
+        self.max_jobs = int(max_jobs)
+        self.max_orders = int(max_orders)
+        self.num_processes = int(num_processes)
+        self.n_orders = int(n_orders)
+        self.n_process = int(n_process)
+        self.batch_size = int(batch_size)
+        self.n_actions = int(n_actions)
         self.max_mem_size = max_mem_size
         self.order_autoencoder = order_autoencoder
         self.process_autoencoder = process_autoencoder
@@ -102,7 +86,7 @@ class LearningAgent(object):
         pad_length = self.max_jobs - seq_length
         padded_state = np.pad(self.current_observation_memory, [(0, pad_length), (0, 0), (0, 0)])
         self.state_memory[:, index, :] = padded_state
-        self.state_seq_length[index] = seq_length
+        self.state_seq_length[index] = seq_length - 1
 
         self.action_memory[index] = action
 
@@ -115,7 +99,7 @@ class LearningAgent(object):
         new_pad_length = self.max_jobs - new_seq_length
         padded_new_state = np.pad(new_state_memory, [(0, new_pad_length), (0, 0), (0, 0)])
         self.new_state_memory[:, index, :] = padded_new_state
-        self.new_state_seq_length[index] = new_seq_length
+        self.new_state_seq_length[index] = new_seq_length - 1
         self.reward_memory[index] = reward
 
         self.mem_counter += 1
@@ -126,13 +110,18 @@ class LearningAgent(object):
             actions = self.Q_eval.forward(state)
             action = torch.argmax(actions).item()
         else:
-
-            if not legal_action_space.size > 0:
-                print(observation.shape)
-                print(observation[0,0,:].reshape(self.max_jobs, -1))
-                print(legal_action_space)
-
             action = np.random.choice(legal_action_space)
+
+        return action
+
+    def choose_greedy_action(self, observation, legal_action_space):
+        state = torch.Tensor(observation).to(self.Q_eval.device)
+        actions = self.Q_eval.forward(state)
+        actions = torch.argsort(actions, descending=True)
+        for action in actions:
+            action = action.item()
+            if action in legal_action_space:
+                break
 
         return action
 
@@ -158,8 +147,8 @@ class LearningAgent(object):
         process_batch = (np.arange(self.num_processes) == process_batch[..., None] - 1).astype(int)
         process_batch = process_batch.reshape(self.max_jobs * self.batch_size * self.max_jobs, self.num_processes)
 
-        order_batch = (self.order_autoencoder.encoder(torch.Tensor(order_batch))).detach().numpy()
-        process_batch = (self.process_autoencoder.encoder(torch.Tensor(process_batch))).detach().numpy()
+        order_batch = (self.order_autoencoder.encoder(torch.Tensor(order_batch).to(self.Q_eval.device))).detach().cpu().clone().numpy()
+        process_batch = (self.process_autoencoder.encoder(torch.Tensor(process_batch).to(self.Q_eval.device))).detach().cpu().clone().numpy()
 
         order_batch = order_batch.reshape(self.max_jobs, self.batch_size, self.max_jobs, self.n_orders)
         process_batch = process_batch.reshape(self.max_jobs, self.batch_size, self.max_jobs, self.n_process)
@@ -180,8 +169,8 @@ class LearningAgent(object):
         process_batch = (np.arange(self.num_processes) == process_batch[..., None] - 1).astype(int)
         process_batch = process_batch.reshape(self.max_jobs * self.batch_size * self.max_jobs, self.num_processes)
 
-        order_batch = (self.order_autoencoder.encoder(torch.Tensor(order_batch))).detach().numpy()
-        process_batch = (self.process_autoencoder.encoder(torch.Tensor(process_batch))).detach().numpy()
+        order_batch = (self.order_autoencoder.encoder(torch.Tensor(order_batch).to(self.Q_eval.device))).detach().cpu().clone().numpy()
+        process_batch = (self.process_autoencoder.encoder(torch.Tensor(process_batch).to(self.Q_eval.device))).detach().cpu().clone().numpy()
 
         order_batch = order_batch.reshape(self.max_jobs, self.batch_size, self.max_jobs, self.n_orders)
         process_batch = process_batch.reshape(self.max_jobs, self.batch_size, self.max_jobs, self.n_process)
@@ -196,6 +185,7 @@ class LearningAgent(object):
         action_batch = self.action_memory[batch]
 
         tensor_batch_index = torch.LongTensor(batch_index)
+
         q_eval = self.Q_eval.forward(state_batch, state_seq_batch, tensor_batch_index)[batch_index, action_batch]
         q_next = self.Q_target.forward(new_state_batch, new_state_seq_batch, tensor_batch_index)
 

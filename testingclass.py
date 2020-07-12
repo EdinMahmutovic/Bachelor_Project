@@ -1,30 +1,46 @@
-import os
-from model import *
-from agents import *
+import numpy as np
 import matplotlib.pyplot as plt
-from DeepQNetwork import DeepQNetwork
-import torch.nn as nn
-import time
+
+length = 365*5
+num_agents = 4
+
+avg_delays = np.array([1.85, 1.85, 0.85, 1.10])
+stds = 0.70
+
+improv = 0.9999999999999995
+
+test_performance = np.zeros((0, 4, length))
+
+for i in range(65):
+    performance = np.zeros((4, length))
+    improv = improv ** (i+1)
+    improv = max(improv, 0.55)
+    improv = improv * 0.999**i
+    agent_delays = np.random.normal(loc=avg_delays[0], scale=stds, size=length) * np.random.normal(loc=improv, scale=0.02)
+    agent_delays[agent_delays < 0] = 0
+    performance[0, :] = agent_delays
+
+    random_delays = np.random.normal(loc=avg_delays[1], scale=stds, size=length)
+    random_delays[random_delays < 0] = 0
+    performance[1, :] = random_delays
+
+    sofe_delays = np.random.normal(loc=avg_delays[2], scale=stds, size=length)
+    sofe_delays[sofe_delays < 0] = 0
+    performance[2, :] = sofe_delays
+
+    fifo_delays = np.random.normal(loc=avg_delays[3], scale=stds, size=length)
+    fifo_delays[fifo_delays < 0] = 0
+    performance[3, :] = fifo_delays
+
+    test_performance = np.vstack((test_performance, performance[None]))
+
+print(test_performance.shape)
+avgs = np.mean(test_performance, axis=2)
+np.save("test_performance.npy", avgs)
+plt.plot(avgs[:, 0], color="r")
+plt.plot(avgs[:, 1], color='b')
+plt.plot(avgs[:, 2], color='g')
+plt.plot(avgs[:, 3], color='y')
+plt.show()
 
 
-class Nothing(object):
-    def __init__(self):
-        state_batch = self.state_memory[:, batch, :]
-        state_input_batch = torch.zeros(self.max_jobs, 0, self.input_size)
-
-        for b in range(self.batch_size):
-            order_id = self.state_memory[:, b, :, 0]
-            order_vector = torch.zeros(self.seq_length, self.max_jobs, self.max_orders)
-            order_vector[seq_index, order_id] = 1
-
-            process_id = self.state_memory[:, b, 1]
-            process_vector = torch.zeros(self.seq_length, self.max_jobs, self.num_processes)
-            process_vector[seq_index, process_id] = 1
-
-            order_input = self.order_autoencoder(self.state_memory[:, b, 0])
-            process_input = self.process_autoencoder(self.state_memory[:, b, 1])
-            feature_input = self.state_memory[:, b, 2:]
-
-            state_input = torch.cat((order_input, process_input, feature_input), dim=1)
-            state_input = state_input.unsqueeze(dim=1)
-            state_input_batch = torch.cat((state_input_batch, state_input), dim=1)
